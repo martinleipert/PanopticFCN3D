@@ -8,7 +8,7 @@ _EPSILON = 1e-10
 
 class PanopticQuality:
 
-    def __init__(self, num_categories, is_thing_mask, min_size_stuff=2048, ignored_category=None):
+    def __init__(self, num_categories, is_thing_mask, min_size_stuff=2048, ignored_category=-1):
 
         # boolean array length num_categories
         self.num_categories = num_categories
@@ -64,7 +64,7 @@ class PanopticQuality:
 
         # Stuff Part
         sem_iou_img = numpy.zeros(self.num_categories)
-        sem_iou_mask = numpy.full_like(sem_iou_img, False)
+        sem_iou_mask = numpy.full_like(sem_iou_img, False, dtype=numpy.bool)
 
         sem_tp = 0
         sem_fn_fp = 0
@@ -76,9 +76,10 @@ class PanopticQuality:
             has_pred = numpy.sum(pred_sem[idx] > 0.5) > self.min_size_stuff
             # If correct yes / no
             has_matched = has_gt == has_pred
-            sem_iou_mask[idx] = has_matched
 
-            if has_matched is True:
+            sem_iou_mask[idx] = has_gt & has_pred
+
+            if has_matched:
                 sem_tp += 1
                 self.tp_per_class[idx] += 1
             else:
@@ -86,13 +87,13 @@ class PanopticQuality:
                 # Doesnt matter for the formula
                 self.fn_per_class[idx] += 1
 
-            class_iou = self.compute_iou(gt_sem[idx], pred_sem[idx])
+            class_iou = self.compute_iou(gt_sem[idx] > 0.5, pred_sem[idx] > 0.5)
             sem_iou_img[idx] = class_iou
             self.iou_per_class[idx] += class_iou
 
         sem_sq_img = numpy.mean(sem_iou_img[sem_iou_mask])
         sem_rq_img = 2 * sem_tp / (2 * sem_tp + sem_fn_fp)
-        sem_pq_img = sem_rq_img
+        sem_pq_img = sem_rq_img * sem_sq_img
 
         self.per_im_scores["Stuff"]["PQ"].append(sem_pq_img)
         self.per_im_scores["Stuff"]["SQ"].append(sem_sq_img)
@@ -176,8 +177,8 @@ class PanopticQuality:
 
     def _valid_categories(self):
         valid = numpy.not_equal(self.tp_per_class + self.fn_per_class + self.fp_per_class, 0)
-        if 0 <= self.ignored_label < self.num_categories:
-            valid[self.ignored_label] = False
+        if 0 <= self.ignored_category < self.num_categories:
+            valid[self.ignored_category] = False
         return valid
 
     def compute_iou(self, mask1, mask2):
@@ -324,6 +325,9 @@ class PanopticQuality:
         for idx, inst in enumerate(annot_inst.items()):
             annot_inst_array[idx] = inst[1]["mask"]
             annot_label_array[idx] = inst[1]["label"].item()
+
+        annot_label_array += stuff_classes + 1
+        pred_label_array += stuff_classes + 1
 
         return sem_areas_annot, annot_inst_array, sem_areas_pred, pred_instances_array, annot_label_array, \
             pred_label_array
